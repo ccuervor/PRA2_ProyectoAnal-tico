@@ -1,0 +1,127 @@
+#Traer los paquetes requeridos:
+library(readxl)
+library(C50)
+library(VIM)
+
+#Leer la data necesaria:
+titanic <- read_excel("C:/Users/cuervoca/Desktop/MasterDataScience/Semestre 2/TipologíaDatos/PRA's/PRA 2/Data/train.xlsx",
+      col_types = c("numeric", "numeric", "numeric", "text", "text", "numeric", "numeric","numeric", "text", "text","text","text"))
+
+#Quedarse con los campos deseados:
+titanic <- titanic[c(2,3,5:8)]
+
+#conocer los datos
+summary(titanic)
+
+#Rellenar los valores vacios de edad:
+titanic <- kNN(titanic, variable = c("Age"),k=10)
+summary(titanic)
+
+#Valores extremos:
+Boxplot(Age~Sex, data=titanic, id.method="y")
+Boxplot(Age~Pclass, data=titanic, id.method="y")
+
+#Prueba de normalidad:
+with(titanic, qqPlot(Age, dist="norm", id.method="y", id.n=2, labels=rownames(titanic)))
+with(titanic, Hist(Age, scale="frequency", breaks="Sturges", col="darkgray"))
+normalityTest(~Age, test="shapiro.test", data=titanic)
+
+#Prueba de homogeneidad de varianzas:
+bartlett.test(Age ~ Sex, data=titanic)
+
+#Aplicación del modelo:
+#Obtener vector de la dimensión de las filas
+vive<-vector(length = dim(titanic)[1])
+#cambiar los nombre de variables
+vive[titanic$Survived== 0]<-"M"
+vive[titanic$Survived== 1]<-"S"
+#Ahora se incorpora esta información a los datos, reemplazando los valores y convirtiendolo en un factor:
+titanic$Survived<-factor(vive)
+
+#Discretizar variables:
+#Analisis jerarquico de edad:
+HClust.1 <- hclust(dist(model.matrix(~-1 + Age, titanic)) , method= "ward")
+plot(HClust.1, main= "Cluster Dendrogram for Solution HClust.1", xlab= "Observation Number in Data Set titanic", sub="Method=ward; Distance=euclidian")
+
+#Prueba con k=2 para la discretización:
+.cluster <-  KMeans(model.matrix(~-1 + Age, titanic), centers = 2, iter.max = 10, num.seeds = 10)
+.cluster$size # Cluster Sizes
+.cluster$centers # Cluster Centroids
+.cluster$withinss # Within Cluster Sum of Squares
+.cluster$tot.withinss # Total Within Sum of Squares
+.cluster$betweenss # Between Cluster Sum of Squares
+biplot(princomp(model.matrix(~-1 + Age, titanic)), xlabs = as.character(.cluster$cluster))
+titanic$KMeans <- assignCluster(model.matrix(~-1 + Age, titanic), titanic, .cluster$cluster)
+remove(.cluster)
+Boxplot(Age~KMeans, data=titanic, id.method="y")
+
+
+#Prueba con k=4 para la discretización:
+.cluster <-  KMeans(model.matrix(~-1 + Age, titanic), centers = 4, iter.max = 10, num.seeds = 10)
+.cluster$size # Cluster Sizes
+.cluster$centers # Cluster Centroids
+.cluster$withinss # Within Cluster Sum of Squares
+.cluster$tot.withinss # Total Within Sum of Squares
+.cluster$betweenss # Between Cluster Sum of Squares
+biplot(princomp(model.matrix(~-1 + Age, titanic)), xlabs = as.character(.cluster$cluster))
+titanic$KMeans <- assignCluster(model.matrix(~-1 + Age, titanic), titanic, .cluster$cluster)
+remove(.cluster)
+Boxplot(Age~KMeans, data=titanic, id.method="y")
+
+#Discretización de la edad:
+edad<-vector(length = dim(titanic)[1])
+edad[titanic$Age >= 0 & titanic$Age < 15]<-"menor"
+edad[titanic$Age >= 15 & titanic$Age < 29]<-"joven"
+edad[titanic$Age >= 29 & titanic$Age < 45]<-"adulto"
+edad[titanic$Age >= 45]<-"adulto_mayor"
+titanic$Age<-factor(edad)
+
+#Discretización del resto de variables:
+conyugues<-vector(length = dim(titanic)[1])
+conyugues[titanic$SibSp== 0]<-"solo"
+conyugues[titanic$SibSp== 1]<-"pareja"
+conyugues[titanic$SibSp== 2|titanic$SibSp== 3]<-"pocos_hermanos"
+conyugues[titanic$SibSp== 4|titanic$SibSp== 5|titanic$SibSp== 8]<-"muchos_hermanos"
+titanic$SibSp<-factor(conyugues)
+
+#Discretización de Parch:
+hijos<-vector(length = dim(titanic)[1])
+hijos[titanic$Parch== 0]<-"sin_padres"
+hijos[titanic$Parch== 1|titanic$Parch== 2]<-"con_padres"
+hijos[titanic$Parch >= 3]<-"con_hijos"
+titanic$Parch<-factor(hijos)
+
+
+#Convertir a factor las variables que faltan y borrar variables no necesarias:
+titanic$Sex<-factor(titanic$Sex)
+titanic$Pclass<-factor(titanic$Pclass)
+titanic <- titanic[c(1:6)]
+
+## Implementación del modelo:
+#Se crea el conjunto de datos para hacer el modelo y para realizar el test
+set.seed(891)
+vive.indice<-sample(1:nrow(titanic),size=(round(nrow(titanic)*0.7)))
+#Se espera hacer la prueba con una muestra aleatoria que represente el 70% de los datos completos:
+vive.entrenar<-titanic[vive.indice,]
+#El 30% restante será para el test
+vive.test<-titanic[-vive.indice,]
+
+#Ahora se crea el modelo
+modelotitanic<-C5.0(Survived ~ ., data = vive.entrenar)
+summary(modelotitanic)
+plot(modelotitanic)
+
+#Realización de predicción para averiguar la calidad del modelo
+predit<- predict(modelotitanic,newdata = vive.test)
+tablapred<-table(predit, vive.test$Survived)
+tablapred  #Matriz de confusión
+
+#Tasa de probabilidad de exitos de la clasificación:
+(sum(diag(tablapred))/sum(tablapred))*100
+
+#Exportar los datos finales de la BBDD:
+write.table(titanic, "C:/Users/cuervoca/Desktop/MasterDataScience/Semestre 2/TipologíaDatos/PRA's/PRA 2/titanic_Output.csv", sep=",", col.names=TRUE, 
+  row.names=TRUE, quote=TRUE, na="NA")
+
+
+
